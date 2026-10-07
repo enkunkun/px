@@ -45,6 +45,21 @@ R=labs/digest-idle/bin/pxlab-remote   # リポジトリのルートから
    `nonce_max_duration=1 minute`、`nonce_max_count=3`、`authenticate_ttl=30 seconds`、`pconn_timeout=10 seconds` に縮め、75 秒の放置とリクエストを 6 回繰り返したところ、すべて 200 だった。
    mcurl はリクエストごとに `curl_easy_reset` で Digest の状態を捨て、毎回新しい nonce で認証し直すため、nonce の失効そのものは引き金にならない。
 
+## 修正（`--authretry`）
+
+px 側に `--authretry=N`（既定 0 = 無効）を足した。
+ブロックされた上流プロキシに対し、最後に問い合わせてから N 秒経っていれば 1 回だけ問い合わせ直す。
+成功すれば mcurl がカウンタを 0 に戻し、失敗すれば次の N 秒まで再びブロックする。
+起点は「最後に問い合わせた時刻」なので、長く放置した後の最初のリクエストですぐに再試行する。
+
+lab での確認結果（2026-10-07）:
+
+| 条件 | 結果 |
+|---|---|
+| `up` → `scenario latch --wait 25`（既定値） | `latched: true`（従来どおり） |
+| `up --px authretry=20` → `scenario latch --wait 25` | 上流が戻った直後から 200、`latched: false` |
+| `authretry=20` で上流を壊したまま、6 本 → 21 秒待つ → 2 本 | squid が受けた Digest 送信は 4 回（閾値の 3 回と再試行 1 回）。間隔内のリクエストは上流に届かない |
+
 ## 未解明のこと
 
 本番で何が 407 を 3 回引き起こすか（ラッチの引き金）は分かっていない。
