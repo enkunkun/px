@@ -41,6 +41,9 @@ R=labs/digest-idle/bin/pxlab-remote   # リポジトリのルートから
    2026-10-04 の mcurl 8.22.0 でも残っている。
 2. **squid は認証済みの資格情報を `authenticate_ttl` の間保持する。**
    パスワードを変えても `squid -k reconfigure` だけでは反映されないので、`fault` は squid を再起動する。
+3. **上流が健全なら、nonce や認証キャッシュが切れても失敗しない。**
+   `nonce_max_duration=1 minute`、`nonce_max_count=3`、`authenticate_ttl=30 seconds`、`pconn_timeout=10 seconds` に縮め、75 秒の放置とリクエストを 6 回繰り返したところ、すべて 200 だった。
+   mcurl はリクエストごとに `curl_easy_reset` で Digest の状態を捨て、毎回新しい nonce で認証し直すため、nonce の失効そのものは引き金にならない。
 
 ## 未解明のこと
 
@@ -48,7 +51,7 @@ R=labs/digest-idle/bin/pxlab-remote   # リポジトリのルートから
 候補と確かめ方は次のとおり。
 
 - 上流の再起動や認証基盤（helper の裏の LDAP/AD 等）の一時的な失敗。squid は helper が ERR/BH を返すと `stale=false` の 407 を返し、libcurl は再送しない
-- `authenticate_ttl` が切れた瞬間に並列リクエストが重なり、一部が 407 になる
+- `authenticate_ttl` が切れた瞬間に並列リクエストが重なり、一部が 407 になる（直列の soak では起きなかった。並列 probe は未実装）
 - keyring がロックされてパスワードが空になる（`PX_PASSWORD` を使っていれば該当しない）
 
 本番の px ログ（`--debug`）に `Proxy authentication failed` と `failed 3 times` が出ているかを確かめるのが最短である。
