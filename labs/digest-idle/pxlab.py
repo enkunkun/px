@@ -72,11 +72,22 @@ def render_digest_passwd(broken):
     return "pxuser:wrong-password\n" if broken else "pxuser:pxpass\n"
 
 
+def is_ok(result):
+    return 200 <= result["status"] < 300
+
+
+def latch_verdict(direct_after, px_after):
+    "Judge whether px stays failed after upstream auth recovered"
+    upstream = is_ok(direct_after)
+    px = any(is_ok(r) for r in px_after)
+    return {"upstream_recovered": upstream, "px_recovered": px, "latched": (not px) if upstream else None}
+
+
 def should_stop(result, keep_going):
     "Stop a soak run on the first non-2xx result unless keep_going is set"
     if keep_going:
         return False
-    return not 200 <= result["status"] < 300
+    return not is_ok(result)
 
 
 ###
@@ -240,8 +251,11 @@ def cmd_soak(args):
 
 
 def cmd_fault(args):
+    print(json.dumps(set_upstream_auth(args.upstream_auth == "broken")))
+
+
+def set_upstream_auth(broken):
     "Break or restore upstream auth without restarting px (keeps px's in-memory state)"
-    broken = args.upstream_auth == "broken"
     # write_text truncates in place, so the single-file bind mount sees the change
     (STATE_DIR / "digest_passwd").write_text(render_digest_passwd(broken))
     # squid keeps verified credentials for authenticate_ttl even across reconfigure,
@@ -249,7 +263,34 @@ def cmd_fault(args):
     compose("restart", "squid", capture=True)
     record = {"ts": utcnow().isoformat(), "fault": "upstream_auth", "broken": broken}
     append_jsonl(CURRENT_RUN / "events.jsonl", record)
-    print(json.dumps(record))
+    return record
+
+
+def summarize(result):
+    return {k: result[k] for k in ("ts", "via", "status")}
+
+
+def cmd_scenario(args):
+    "latch: fail upstream auth N times, restore it, then check whether px recovers"
+    steps = []
+    steps.append({"step": "baseline", **summarize(probe())})
+    set_upstream_auth(broken=True)
+    time.sleep(2)
+    for _ in range(args.failures):
+        steps.append({"step": "upstream_broken", **summarize(probe())})
+    set_upstream_auth(broken=False)
+    time.sleep(2)
+    direct = probe(via="squid")
+    steps.append({"step": "upstream_restored", **summarize(direct)})
+    if args.wait:
+        time.sleep(args.wait)
+    px_after = [probe() for _ in range(args.after)]
+    steps.extend({"step": "px_after_restore", **summarize(r)} for r in px_after)
+    verdict = latch_verdict(direct, px_after)
+    record = {"scenario": "latch", "failures": args.failures, "wait": args.wait, "steps": steps, **verdict}
+    append_jsonl(CURRENT_RUN / "scenarios.jsonl", record)
+    print(json.dumps(record, indent=2))
+    return 1 if verdict["latched"] else 0
 
 
 def cmd_collect(args):
@@ -304,6 +345,13 @@ def main(argv=None):
     p = sub.add_parser("fault", help="inject upstream faults")
     p.add_argument("--upstream-auth", choices=["broken", "ok"], required=True)
     p.set_defaults(func=cmd_fault)
+
+    p = sub.add_parser("scenario", help="run a scripted reproduction; exit 1 if the bug reproduces")
+    p.add_argument("name", choices=["latch"])
+    p.add_argument("--failures", type=int, default=3, help="probes sent while upstream auth is broken")
+    p.add_argument("--wait", type=float, default=0, help="seconds to wait after upstream recovers")
+    p.add_argument("--after", type=int, default=2, help="probes sent through px after recovery")
+    p.set_defaults(func=cmd_scenario)
 
     sub.add_parser("collect", help="dump logs and archive runs/current").set_defaults(func=cmd_collect)
     sub.add_parser("status").set_defaults(func=cmd_status)

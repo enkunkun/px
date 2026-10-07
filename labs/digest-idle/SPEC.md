@@ -48,8 +48,13 @@ Agent はこの CLI だけで操作できるようにする。出力は機械可
 | `pxlab soak --idle SEC --rounds N` | 「放置 → probe」を N 回繰り返し、結果を JSONL に追記する。401/407 を検出したら止める（`--keep-going` で継続） |
 | `pxlab collect` | ログと pcap を `runs/<timestamp>/` に回収する |
 | `pxlab status` | 各コンテナの状態と、現在の設定値を JSON で返す |
+| `pxlab fault --upstream-auth broken\|ok` | 上流の認証を壊す・戻す（px は再起動しない） |
+| `pxlab scenario latch` | 失敗カウンタのラッチ再現。再現したら終了コード 1（修正の回帰確認に使う） |
 
 ## px 側のデバッグコード
+
+> 2026-10-07: 実装は見送った。px 既存の `--verbose` が、上流との送受信ヘッダー（`Proxy-Authenticate` の `stale=` を含む）と mcurl の判定（`Proxy authentication failed`、`failed 3 times`）をすでに出力しており、ラッチの再現と特定にはそれで足りた。
+> 下記は、既存ログで足りない事象が出た時に足す候補として残す。
 
 環境変数 `PX_DEBUG_AUTH=1` の時だけ有効にする。無効時は既存の挙動とログを変えない。
 

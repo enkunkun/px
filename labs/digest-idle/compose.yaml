@@ -25,10 +25,12 @@ services:
 
   client:
     image: curlimages/curl:latest
+    init: true
     entrypoint: ["sleep", "infinity"]
 
   capture:
     image: nicolaka/netshoot:latest
+    init: true
     network_mode: service:px
     cap_add: [NET_ADMIN, NET_RAW]
     volumes:

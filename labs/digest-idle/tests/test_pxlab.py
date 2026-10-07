@@ -56,3 +56,18 @@ def test_render_digest_passwd_ok():
 
 def test_render_digest_passwd_broken_rejects_px_password():
     assert "pxuser:pxpass\n" not in pxlab.render_digest_passwd(broken=True)
+
+
+def test_latch_verdict_latched_when_px_fails_after_upstream_recovers():
+    verdict = pxlab.latch_verdict(direct_after={"status": 200}, px_after=[{"status": 401}, {"status": 401}])
+    assert verdict == {"upstream_recovered": True, "px_recovered": False, "latched": True}
+
+
+def test_latch_verdict_not_latched_when_px_recovers():
+    verdict = pxlab.latch_verdict(direct_after={"status": 200}, px_after=[{"status": 401}, {"status": 200}])
+    assert verdict == {"upstream_recovered": True, "px_recovered": True, "latched": False}
+
+
+def test_latch_verdict_inconclusive_when_upstream_still_broken():
+    verdict = pxlab.latch_verdict(direct_after={"status": 407}, px_after=[{"status": 401}])
+    assert verdict["latched"] is None
