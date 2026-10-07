@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Sync this px tree to the Docker host and run pxlab.py there.
+#   PXLAB_HOST   ssh host with docker (required)
+#   PXLAB_DIR    remote checkout dir   (default: pxlab-src, relative to remote $HOME)
+# "pxlab-remote pull" copies the remote runs/ back into labs/digest-idle/runs/.
+set -euo pipefail
+
+host="${PXLAB_HOST:?set PXLAB_HOST to an ssh host with docker}"
+dir="${PXLAB_DIR:-pxlab-src}"
+root="$(cd "$(dirname "$0")/../../.." && pwd)"
+lab="labs/digest-idle"
+
+if [[ "${1:-}" == "pull" ]]; then
+  rsync -a "$host:$dir/$lab/runs/" "$root/$lab/runs/"
+  exit 0
+fi
+
+rsync -a --delete \
+  --exclude '.git/' --exclude '.jj/' --exclude '.venv/' --exclude '__pycache__/' \
+  --exclude "$lab/runs/" --exclude "$lab/.state/" \
+  "$root/" "$host:$dir/"
+
+exec ssh "$host" "cd $dir/$lab && python3 pxlab.py $(printf '%q ' "$@")"

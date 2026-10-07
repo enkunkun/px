@@ -151,6 +151,8 @@ ignore = [
 "px/windows.py" = ["SIM115"]
 # C901: complex Windows proxy detection functions
 "px/wproxy.py" = ["C901"]
+# Investigation labs: docker subprocess calls, asserts in tests, descriptive exception messages
+"labs/*" = ["S101", "S603", "S607", "TRY003"]
 # Build script: subprocess/shell commands, complex functions
 "tools.py" = ["C901", "S602", "S605", "S607"]
 

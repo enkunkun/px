@@ -1,0 +1,36 @@
+# Lab for investigating px upstream Digest auth failures after idle.
+# Driven by pxlab.py, which renders .state/ before starting the stack.
+name: pxlab
+
+services:
+  squid:
+    image: ubuntu/squid:latest
+    volumes:
+      - ./.state/squid.conf:/etc/squid/squid.conf:ro
+      - ./.state/digest_passwd:/etc/squid/digest_passwd:ro
+
+  origin:
+    image: traefik/whoami:latest
+
+  px:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+      target: mini
+      args:
+        BUILDER: local
+    env_file: ./.state/px.env
+    command: ["--server=squid:3128", "--auth=DIGEST", "--username=pxuser", "--gateway", "--verbose"]
+    depends_on: [squid, origin]
+
+  client:
+    image: curlimages/curl:latest
+    entrypoint: ["sleep", "infinity"]
+
+  capture:
+    image: nicolaka/netshoot:latest
+    network_mode: service:px
+    cap_add: [NET_ADMIN, NET_RAW]
+    volumes:
+      - ./runs/current:/captures
+    command: ["tcpdump", "-i", "any", "-s", "0", "-U", "-C", "100", "-W", "10", "-w", "/captures/px.pcap", "tcp port 3128"]
