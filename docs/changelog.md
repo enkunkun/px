@@ -2,6 +2,22 @@
 
 ---
 
+## Unreleased
+
+### New features
+- Added `--authretry=N` to recover from upstream authentication failures without
+  restarting Px.  After 3 consecutive failures Px blocks the upstream proxy to
+  avoid locking out the account, and previously stayed blocked until restarted,
+  so a transient upstream failure left Px returning 401 indefinitely.  With
+  `--authretry`, Px sends one request to the blocked proxy once N seconds have
+  passed since the last request sent through it.  Disabled by default.
+
+### Internal
+- Added `labs/digest-idle`, a Docker based lab with squid Digest auth for
+  reproducing upstream authentication failures against a locally built Px.
+
+---
+
 ## v0.12.0 — 2026-07-21
 
 ### New features
