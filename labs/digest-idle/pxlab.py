@@ -229,6 +229,38 @@ def append_jsonl(path, record):
         f.write(json.dumps(record) + "\n")
 
 
+def burst(n, url=ORIGIN_URL, log_margin=1.0):
+    "Send n concurrent requests through px and return status counts with surrounding logs"
+    script = (
+        f"for i in $(seq {int(n)}); do "
+        f'curl -s -o /dev/null --max-time 30 -x http://px:3128 -w "%{{http_code}}\\n" "$0" & '
+        "done; wait"
+    )
+    start = utcnow()
+    out = compose("exec", "-T", "client", "sh", "-c", script, url, capture=True, check=False)
+    time.sleep(log_margin)
+    since = datetime.fromtimestamp(start.timestamp() - log_margin, timezone.utc).isoformat()
+    statuses = [int(line) for line in out.stdout.split() if line.isdigit()]
+    counts = {str(code): statuses.count(code) for code in sorted(set(statuses))}
+    return {
+        "ts": start.isoformat(),
+        "n": n,
+        "counts": counts,
+        "px_log": service_logs("px", since, utcnow().isoformat()),
+        "squid_log": service_logs("squid", since, utcnow().isoformat()),
+    }
+
+
+def cmd_burst(args):
+    "Repeat idle -> n concurrent requests; one compact JSON line per round"
+    for round_no in range(1, args.rounds + 1):
+        time.sleep(args.idle)
+        result = burst(args.n, args.url)
+        result["round"] = round_no
+        append_jsonl(CURRENT_RUN / "burst.jsonl", result)
+        print(json.dumps({"round": round_no, "ts": result["ts"], "counts": result["counts"]}), flush=True)
+
+
 def cmd_probe(args):
     result = probe(args.url, args.via)
     append_jsonl(CURRENT_RUN / "probes.jsonl", result)
@@ -341,6 +373,13 @@ def main(argv=None):
             p.add_argument("--rounds", type=int, default=10)
             p.add_argument("--keep-going", action="store_true")
         p.set_defaults(func=func)
+
+    p = sub.add_parser("burst", help="repeat idle -> N concurrent requests through px")
+    p.add_argument("--n", type=int, default=10)
+    p.add_argument("--idle", type=float, default=0)
+    p.add_argument("--rounds", type=int, default=1)
+    p.add_argument("--url", default=ORIGIN_URL)
+    p.set_defaults(func=cmd_burst)
 
     p = sub.add_parser("fault", help="inject upstream faults")
     p.add_argument("--upstream-auth", choices=["broken", "ok"], required=True)

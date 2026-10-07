@@ -23,6 +23,7 @@ R=labs/digest-idle/bin/pxlab-remote   # リポジトリのルートから
 | `$R up [--squid KEY=VAL ...] [--px KEY=VAL ...]` | 設定を書き出し、スタックを作り直す。直前の `runs/current` は `runs/<時刻>/` に退避する |
 | `$R probe [--via px\|squid]` | 1 リクエストを送り、ステータスとその時間帯の px / squid のログを JSON で返す |
 | `$R soak --idle 秒 --rounds N [--keep-going]` | 「放置 → probe」を繰り返す。2xx 以外で止まる |
+| `$R burst --n N [--idle 秒] [--rounds R]` | 「放置 → N 本の並列リクエスト」を繰り返し、ステータスの内訳を返す |
 | `$R fault --upstream-auth broken\|ok` | squid のパスワードを壊す・戻す。squid だけを再起動し、px のメモリ上の状態は保つ |
 | `$R scenario latch [--failures N] [--wait 秒]` | ラッチ再現の一連の手順。再現したら終了コード 1 |
 | `$R status` / `$R collect` / `$R down` | 状態の確認、ログと pcap の回収、停止 |
@@ -44,6 +45,11 @@ R=labs/digest-idle/bin/pxlab-remote   # リポジトリのルートから
 3. **上流が健全なら、nonce や認証キャッシュが切れても失敗しない。**
    `nonce_max_duration=1 minute`、`nonce_max_count=3`、`authenticate_ttl=30 seconds`、`pconn_timeout=10 seconds` に縮め、75 秒の放置とリクエストを 6 回繰り返したところ、すべて 200 だった。
    mcurl はリクエストごとに `curl_easy_reset` で Digest の状態を捨て、毎回新しい nonce で認証し直すため、nonce の失効そのものは引き金にならない。
+   並列でも同じで、`authenticate_ttl=30 seconds` の境目に 31 秒の放置と 20 本の並列リクエストを 8 回送ったところ、160 本すべて 200 だった（squid 6.13）。
+4. **引き金は「正しい資格情報が一時的に拒否される窓」である。**
+   squid は資格情報を拒否すると `stale=false` の 407 を返し、libcurl はそれを再送しないので、mcurl が失敗として数える。
+   上流や認証基盤の再起動などでこの窓が開いている間に 3 回リクエストが通れば、ラッチがかかる。
+   放置中も OS やアプリのバックグラウンド通信は px を通るので、利用者が席を外している間にラッチがかかり、戻った時には 401 になっている。
 
 ## 修正（`--authretry`）
 
@@ -66,7 +72,7 @@ lab での確認結果（2026-10-07）:
 候補と確かめ方は次のとおり。
 
 - 上流の再起動や認証基盤（helper の裏の LDAP/AD 等）の一時的な失敗。squid は helper が ERR/BH を返すと `stale=false` の 407 を返し、libcurl は再送しない
-- `authenticate_ttl` が切れた瞬間に並列リクエストが重なり、一部が 407 になる（直列の soak では起きなかった。並列 probe は未実装）
+- `authenticate_ttl` が切れた瞬間に並列リクエストが重なり、一部が 407 になる（squid 6.13 では再現せず。本番の上流が別製品なら起こりうる）
 - keyring がロックされてパスワードが空になる（`PX_PASSWORD` を使っていれば該当しない）
 
 本番の px ログ（`--debug`）に `Proxy authentication failed` と `failed 3 times` が出ているかを確かめるのが最短である。
